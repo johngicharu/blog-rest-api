@@ -1,65 +1,117 @@
 const express = require("express");
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const checkAuth = require("../middleware/checkAuth");
 
 const router = express.Router();
-const mongoose = require("mongoose");
+
 const User = require("../../models/user");
 const validateUserRegistration = require("../../validation/userValidation");
 const validateUpdateDetails = require("../../validation/validateUpdateDetails");
 const validatePw = require("../../validation/validatePw");
+const validateUserLogin = require("../../validation/validateUserLogin");
 
-const bcrypt = require("bcryptjs");
+// Routes
+// Get Subscribers except admin
+// Get All except admin
+// Get Single user/id
+// /register (Post) User
+// /subscribe/userid Add subscriber role to user
+// /unsubscribe/userid Remove subscriber role from user
+// /makeguest/userid (post) must send in password to activate guest (Can only be done by admin)
+// /removeguest/userid (patch) removes password from guest (can only be done by admin)
+// /updatepw/userid (patch) for guests and admins, updating passwords
+// /userid (delete) delete user from all lists, can only be done by admin
 
-router.get("/subscribers", (req, res) => {
+// Other possible routes to be added later
+// delete all subscribers
+// login to get auth key, seperate logins for guests and admins
+// Set password for turning into admin/guest, updatepassword/changepw, forgotpassword
+
+// @route   GET api/users/subscribers
+// @desc    get all subs apart from those marked admin/guest
+// @access  private (for guests and admins only)
+router.get("/subscribers", checkAuth, (req, res) => {
 	const errors = {};
 
-	User.find({ roles: "subscriber" })
-		.sort({ date: -1 })
-		.then(users =>
-			res.status(200).json({
-				message: "Successfully Fetched Users",
-				data: users,
-				errors: null
-			})
+	if (req.user.roles.includes("admin") || req.user.roles.includes("guest")) {
+		User.find(
+			{
+				roles: "subscriber",
+				$and: [{ roles: { $ne: "admin" } }, { roles: { $ne: "guest" } }]
+			},
+			{ password: 0 }
 		)
-		.catch(err => {
-			errors.err = err;
+			.sort({ date: -1 })
+			.then(users =>
+				res.status(200).json({
+					message: "Successfully Fetched Users",
+					data: users,
+					errors: null
+				})
+			)
+			.catch(err => {
+				errors.err = err;
 
-			return res.status(500).json({
-				message: `Error: There was an error processing your request`,
-				data: null,
-				errors
+				return res.status(500).json({
+					message: `Error: There was an error processing your request`,
+					data: null,
+					errors
+				});
 			});
-		});
+	}
 });
 
-// All Users
-router.get("/all", (req, res) => {
+// @route   GET api/users/all
+// @desc    Fetch all users apart from admins
+// @access  private (for admin only)
+router.get("/all", checkAuth, (req, res) => {
 	const errors = {};
 
-	User.find({ roles: { $ne: "admin" } })
-		.sort({ date: -1 })
-		.then(users =>
-			res.status(200).json({
-				message: "Successfully Fetched Users",
-				data: users,
-				errors: null
-			})
-		)
-		.catch(err => {
-			errors.err = err;
+	if (req.user.roles.includes("admin")) {
+		User.find({}, { password: 0 })
+			.sort({ date: -1 })
+			.then(users =>
+				res.status(200).json({
+					message: "Successfully Fetched Users",
+					data: users,
+					errors: null
+				})
+			)
+			.catch(err => {
+				errors.err = err;
 
-			return res.status(500).json({
-				message: `Error: There was an error processing your request`,
-				data: null,
-				errors
+				return res.status(500).json({
+					message: `Error: There was an error processing your request`,
+					data: null,
+					errors
+				});
 			});
+	} else {
+		errors.err = "Auth Failed";
+
+		return res.status(401).json({
+			message: "Auth Failed",
+			data: null,
+			errors
 		});
+	}
 });
 
+// @route   get api/users/:userId
+// @desc    get single user, for non admins and nonguests
+// @access  public
 router.get("/:userId", (req, res) => {
 	const errors = {};
 
-	User.findById(req.params.userId)
+	User.findOne(
+		{
+			_id: req.params.userId,
+			$and: [{ roles: { $ne: "admin" } }, { roles: { $ne: "guest" } }]
+		},
+		{ password: 0 }
+	)
 		.then(user => {
 			res.status(200).json({
 				message: "Successfully Fetched User",
@@ -78,6 +130,9 @@ router.get("/:userId", (req, res) => {
 		});
 });
 
+// @route   POST api/users/removeguest/:userId
+// @desc    Add user and set as subscriber
+// @access  public
 router.post("/register", (req, res) => {
 	// Check user inputs
 	// Check if user exists
@@ -92,7 +147,7 @@ router.post("/register", (req, res) => {
 		});
 	}
 
-	User.findOne({ email: req.body.email }).then(user => {
+	User.findOne({ email: req.body.email }, { password: 0 }).then(user => {
 		if (user) {
 			errors.email = "Email already registered";
 
@@ -131,7 +186,72 @@ router.post("/register", (req, res) => {
 	});
 });
 
-router.patch("/makeguest/:userId", (req, res) => {
+// @route   POST api/users/login
+// @desc    User login
+// @access  public
+router.post("/login", (req, res) => {
+	const { errors, isValid } = validateUserLogin(req.body);
+
+	if (!isValid) {
+		return res.status(404).json({
+			message: "Invalid Input",
+			data: null,
+			errors
+		});
+	}
+
+	User.findOne({ email: req.body.email }).then(user => {
+		bcrypt.compare(req.body.password, user.password, (err, pwIsValid) => {
+			if (err) {
+				errors.err = "Auth Failed";
+
+				return res.status(401).json({
+					message: "Auth Failed",
+					data: null,
+					errors
+				});
+			}
+
+			if (pwIsValid) {
+				const userData = {
+					_id: user._id,
+					username: user.username,
+					email: user.email,
+					roles: user.roles,
+					createdOn: user.createdOn
+				};
+
+				const options = {
+					expiresIn: "1h",
+					issuer: "yousite.com"
+				};
+
+				// Return token to user
+				jwt.sign(userData, "secret", options, (err, token) => {
+					if (err) {
+						errors.err = "Auth Failed";
+						return res.status(401).json({
+							message: "Auth Failed",
+							data: null,
+							errors
+						});
+					}
+
+					return res.status(200).json({
+						message: "Successfully logged in",
+						token: `Bearer ${token}`,
+						errors: null
+					});
+				});
+			}
+		});
+	});
+});
+
+// @route   PATCH api/users/makeguest/:userId
+// @desc    Addd user to guest list
+// @access  private (for admin only)
+router.patch("/makeadmin/:userId", checkAuth, (req, res) => {
 	const { errors, isValid } = validatePw(req.body);
 
 	if (!isValid) {
@@ -142,41 +262,169 @@ router.patch("/makeguest/:userId", (req, res) => {
 		});
 	}
 
-	bcrypt.genSalt(10, (err, salt) => {
-		bcrypt.hash(req.body.password, salt, (err, hash) => {
-			if (err) console.log(err);
-			// set password to hashed password
+	if (req.user.roles.includes("admin")) {
+		bcrypt.genSalt(10, (err, salt) => {
+			bcrypt.hash(req.body.password, salt, (err, hash) => {
+				if (err) console.log(err);
+				// set password to hashed password
 
-			User.findByIdAndUpdate(
-				req.params.userId,
-				{
-					$addToSet: { roles: "guest" },
-					$set: { password: hash }
-				},
-				{ new: true }
-			)
-				.then(user => {
-					res.status(200).json({
-						message: "Success, you are now a guest user",
-						data: user,
-						errors: null
+				User.findOneAndUpdate(
+					{ _id: req.params.userId },
+					{
+						$addToSet: { roles: "admin" },
+						$set: { password: hash, modifiedOn: Date.now() }
+					},
+					{
+						fields: { password: 0 },
+						new: true
+					}
+				)
+					.then(user => {
+						res.status(200).json({
+							message: "Success, you are now a guest user",
+							data: user,
+							errors: null
+						});
+					})
+					.catch(err => {
+						errors.err = err;
+
+						res.status(500).json({
+							message: `Error: There was an error processing your request`,
+							data: null,
+							errors
+						});
 					});
-				})
-				.catch(err => {
-					errors.err = err;
+			});
+		});
+	} else {
+		errors.err = "Auth Failed";
+		return res.status(401).json({
+			message: "Auth Failed",
+			data: null,
+			errors
+		});
+	}
+});
 
-					res.status(500).json({
-						message: `Error: There was an error processing your request`,
+// @route   PATCH api/users/makeguest/:userId
+// @desc    Addd user to guest list
+// @access  private (for admin only)
+router.patch("/makeguest/:userId", checkAuth, (req, res) => {
+	const { errors, isValid } = validatePw(req.body);
+
+	if (!isValid) {
+		return res.status(400).json({
+			message: "Error: Invalid Input",
+			data: null,
+			errors
+		});
+	}
+
+	if (req.user.roles.includes("admin")) {
+		bcrypt.genSalt(10, (err, salt) => {
+			bcrypt.hash(req.body.password, salt, (err, hash) => {
+				if (err) console.log(err);
+				// set password to hashed password
+
+				User.findOneAndUpdate(
+					{ _id: req.params.userId },
+					{
+						$addToSet: { roles: "guest" },
+						$set: { password: hash, modifiedOn: Date.now() }
+					},
+					{
+						fields: { password: 0 },
+						new: true
+					}
+				)
+					.then(user => {
+						res.status(200).json({
+							message: "Success, you are now a guest user",
+							data: user,
+							errors: null
+						});
+					})
+					.catch(err => {
+						errors.err = err;
+
+						res.status(500).json({
+							message: `Error: There was an error processing your request`,
+							data: null,
+							errors
+						});
+					});
+			});
+		});
+	} else {
+		errors.err = "Auth Failed";
+		return res.status(401).json({
+			message: "Auth Failed",
+			data: null,
+			errors
+		});
+	}
+});
+
+// @route   PATCH api/users/removeguest/:userId
+// @desc    Remove user from guest list
+// @access  private (for admin only)
+router.patch("/removeguest/:userId", checkAuth, (req, res) => {
+	const errors = {};
+
+	if (req.user.roles.includes("admin")) {
+		User.findOneAndUpdate(
+			{
+				_id: req.params.userId,
+				$and: [{ roles: { $ne: "admin" } }, { roles: "guest" }]
+			},
+			{
+				$pull: { roles: "guest" },
+				$unset: { password: "" },
+				$set: { modifiedOn: Date.now() }
+			},
+			{ fields: { password: 0 }, new: true }
+		)
+			.then(user => {
+				if (!user) {
+					errors.err = "Sorry, User was not found";
+
+					return res.status(401).json({
+						message: "Error: User not found",
 						data: null,
 						errors
 					});
+				} else {
+					return res.status(200).json({
+						message: "User removed from guest list",
+						data: user,
+						errors: null
+					});
+				}
+			})
+			.catch(err => {
+				errors.err = err;
+
+				return res.status(500).json({
+					message: "There was an error processing your request",
+					data: null,
+					errors
 				});
+			});
+	} else {
+		errors.err = "Auth Failed";
+		return res.status(401).json({
+			message: "Auth Failed",
+			data: null,
+			errors
 		});
-	});
+	}
 });
 
-// Private Route
-router.patch("/update/:userId", (req, res) => {
+// @route   PATCH api/users/update/:userId
+// @desc    Update user details (name and email only)
+// @access  private for admins and guests
+router.patch("/update/:userId", checkAuth, (req, res) => {
 	const { errors, isValid } = validateUpdateDetails(req.body);
 
 	if (!isValid) {
@@ -186,35 +434,55 @@ router.patch("/update/:userId", (req, res) => {
 			errors
 		});
 	}
-	User.findByIdAndUpdate(
-		req.params.userId,
-		{
-			$set: {
-				username: req.body.username ? req.body.username : username,
-				email: req.body.email ? req.body.email : email
-			}
-		},
-		{ new: true }
-	)
-		.then(user => {
-			res.status(200).json({
-				message: "Successfully Updated",
-				data: user,
-				errors: null
-			});
-		})
-		.catch(err => {
-			errors.err = err;
 
-			res.status(500).json({
-				message: "Error: There was an error processing your request",
-				data: null,
-				errors
+	if (
+		req.user._id === req.params.userId &&
+		(req.user.roles.includes("admin") || req.user.roles.includes("guest"))
+	) {
+		User.findOneAndUpdate(
+			{
+				_id: req.params.userId,
+				$and: [{ roles: { $ne: "admin" } }, { roles: { $ne: "guest" } }]
+			},
+			{
+				$set: {
+					username: req.body.username ? req.body.username : username,
+					email: req.body.email ? req.body.email : email,
+					modifiedOn: Date.now()
+				}
+			},
+			{ fields: { password: 0 }, new: true }
+		)
+			.then(user => {
+				res.status(200).json({
+					message: "Successfully Updated",
+					data: user,
+					errors: null
+				});
+			})
+			.catch(err => {
+				errors.err = err;
+
+				res.status(500).json({
+					message: "Error: There was an error processing your request",
+					data: null,
+					errors
+				});
 			});
+	} else {
+		errors.err = "Auth Failed";
+		return res.status(401).json({
+			message: "Auth Failed",
+			data: null,
+			errors
 		});
+	}
 });
 
-router.patch("/updatepw/:userId", (req, res) => {
+// @route   PATCH api/users/updatepw/:userId
+// @desc    Update guest/admin password
+// @access  private (for admins and guests only)
+router.patch("/updatepw/:userId", checkAuth, (req, res) => {
 	const { errors, isValid } = validatePw(req.body);
 
 	if (!isValid) {
@@ -225,93 +493,66 @@ router.patch("/updatepw/:userId", (req, res) => {
 		});
 	}
 
-	bcrypt.genSalt(10, (err, salt) => {
-		bcrypt.hash(req.body.password, salt, (err, hash) => {
-			if (err) console.log(err);
-			// set password to hashed password
+	if (
+		req.user._id === req.params.userId &&
+		(req.user.roles.includes("admin") || req.user.roles.includes("guest"))
+	) {
+		bcrypt.genSalt(10, (err, salt) => {
+			bcrypt.hash(req.body.password, salt, (err, hash) => {
+				if (err) console.log(err);
+				// set password to hashed password
 
-			User.findOneAndUpdate(
-				{
-					_id: req.params.userId,
-					$or: [{ roles: "guest" }, { roles: "admin" }]
-				},
-				{
-					$set: { password: hash }
-				},
-				{ new: true }
-			)
-				.then(user => {
-					if (user) {
-						return res.status(200).json({
-							message: "Password successfully updated",
-							data: user,
-							errors: null
-						});
-					} else {
-						errors.err = "Sorry, only guests and admins can set passwords";
+				User.findOneAndUpdate(
+					{
+						_id: req.params.userId,
+						$or: [{ roles: "guest" }, { roles: "admin" }]
+					},
+					{
+						$set: { password: hash, modifiedOn: Date.now() }
+					},
+					{ fields: { password: 0 }, new: true }
+				)
+					.then(user => {
+						if (user) {
+							return res.status(200).json({
+								message: "Password successfully updated",
+								data: user,
+								errors: null
+							});
+						} else {
+							errors.err = "Sorry, only guests and admins can set passwords";
 
-						return res.status(401).json({
-							message: "Error: You are not a guest or admin",
+							return res.status(401).json({
+								message: "Error: You are not a guest or admin",
+								data: null,
+								errors
+							});
+						}
+					})
+					.catch(err => {
+						errors.err = err;
+
+						res.status(500).json({
+							message: `Error: There was processing your request`,
 							data: null,
 							errors
 						});
-					}
-				})
-				.catch(err => {
-					errors.err = err;
-
-					res.status(500).json({
-						message: `Error: There was processing your request`,
-						data: null,
-						errors
 					});
-				});
-		});
-	});
-});
-
-// remove guests
-router.patch("/removeguest/:userId", (req, res) => {
-	const errors = {};
-
-	User.findOneAndUpdate(
-		{
-			_id: req.params.userId,
-			$and: [{ roles: { $ne: "admin" } }, { roles: "guest" }]
-		},
-		{
-			$pull: { roles: "guest" }
-		}
-	)
-		.then(user => {
-			if (!user) {
-				errors.err = "Sorry, User was not found";
-
-				return res.status(401).json({
-					message: "Error: User not found",
-					data: null,
-					errors
-				});
-			} else {
-				return res.status(200).json({
-					message: "User removed from guest list",
-					data: user,
-					errors: null
-				});
-			}
-		})
-		.catch(err => {
-			errors.err = err;
-
-			return res.status(500).json({
-				message: "There was an error processing your request",
-				data: null,
-				errors
 			});
 		});
+	} else {
+		errors.err = "Auth Failed";
+		return res.status(401).json({
+			message: "Auth Failed",
+			data: null,
+			errors
+		});
+	}
 });
 
-// Subscribe
+// @route   PATCH api/users/subscribe/:userId
+// @desc    Subscribe user to list
+// @access  public (cannot be done for admins for security reasons)
 router.patch("/subscribe/:userId", (req, res) => {
 	const errors = {};
 
@@ -321,9 +562,10 @@ router.patch("/subscribe/:userId", (req, res) => {
 			$and: [{ roles: { $ne: "admin" } }, { roles: { $ne: "subscriber" } }]
 		},
 		{
-			$addToSet: { roles: "subscriber" }
+			$addToSet: { roles: "subscriber" },
+			$set: { modifiedOn: Date.now() }
 		},
-		{ new: true }
+		{ fields: { password: 0 }, new: true }
 	)
 		.then(user => {
 			if (!user) {
@@ -354,7 +596,9 @@ router.patch("/subscribe/:userId", (req, res) => {
 		});
 });
 
-// unsubscribe
+// @route   PATCH api/users/unsubscribe/:userId
+// @desc    Remove subscriber from list
+// @access  public (not for admins)
 router.patch("/unsubscribe/:userId", (req, res) => {
 	const errors = {};
 
@@ -364,7 +608,8 @@ router.patch("/unsubscribe/:userId", (req, res) => {
 			$and: [{ roles: { $ne: "admin" } }, { roles: "subscriber" }]
 		},
 		{
-			$pull: { roles: "subscriber" }
+			$pull: { roles: "subscriber" },
+			$set: { modifiedOn: Date.now() }
 		}
 	)
 		.then(user => {
@@ -395,42 +640,54 @@ router.patch("/unsubscribe/:userId", (req, res) => {
 		});
 });
 
-router.delete("/:userId", (req, res) => {
+// @route   DELETE api/users/delete/:userId
+// @desc    Completely delete user
+// @access  private (for admin only)
+router.delete("/:userId", checkAuth, (req, res) => {
 	// Validate if user is admin
 	// Find and delete user
 	const errors = {};
 
-	User.findOneAndDelete({
-		_id: req.params.userId,
-		$or: [{ roles: "guest" }, { roles: "subscriber" }],
-		$and: [{ roles: { $ne: "admin" } }]
-	})
-		.then(user => {
-			if (!user) {
-				errors.err = "Sorry, User was not found";
+	if (req.user.roles.includes("admin")) {
+		User.findOneAndDelete({
+			_id: req.params.userId,
+			$or: [{ roles: "guest" }, { roles: "subscriber" }],
+			$and: [{ roles: { $ne: "admin" } }]
+		})
+			.then(user => {
+				if (!user) {
+					errors.err = "Sorry, User was not found";
 
-				return res.status(401).json({
-					message: "Error: User not found",
+					return res.status(401).json({
+						message: "Error: User not found",
+						data: null,
+						errors
+					});
+				} else {
+					return res.status(200).json({
+						message: "Success: User Account Deleted",
+						data: user,
+						errors: null
+					});
+				}
+			})
+			.catch(err => {
+				errors.err = err;
+
+				return res.status(500).json({
+					message: "There was an error processing your request",
 					data: null,
 					errors
 				});
-			} else {
-				return res.status(200).json({
-					message: "Success: User Account Deleted",
-					data: user,
-					errors: null
-				});
-			}
-		})
-		.catch(err => {
-			errors.err = err;
-
-			return res.status(500).json({
-				message: "There was an error processing your request",
-				data: null,
-				errors
 			});
+	} else {
+		errors.err = "Auth Failed";
+		return res.status(401).json({
+			message: "Auth Failed",
+			data: null,
+			errors
 		});
+	}
 });
 
 // No need to delete all users

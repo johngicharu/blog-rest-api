@@ -1,5 +1,6 @@
 {
-  "env": {
-    "MONGO_PW": "password"
-  }
+	"env": {
+		"MONGO_PW": "password",
+		"SECRET_OR_KEY": "secret"
+	}
 }
