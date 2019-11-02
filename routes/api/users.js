@@ -60,6 +60,14 @@ router.get("/subscribers", checkAuth, (req, res) => {
 					errors
 				});
 			});
+	} else {
+		errors.err = "Auth Failed";
+
+		return res.status(401).json({
+			message: "Auth Failed",
+			data: null,
+			errors
+		});
 	}
 });
 
@@ -149,39 +157,51 @@ router.post("/register", (req, res) => {
 
 	User.findOne({ email: req.body.email }, { password: 0 }).then(user => {
 		if (user) {
-			errors.email = "Email already registered";
+			errors.email = "Email already exists";
 
 			return res.status(400).json({
-				message: "Error: Email already exists",
+				message: errors.message,
 				data: null,
 				errors
 			});
 		} else {
-			const newUser = new User({
-				_id: new mongoose.Types.ObjectId(),
-				username: req.body.username,
-				email: req.body.email,
-				roles: "subscriber"
-			});
+			User.findOne({ username: req.body.username }).then(user => {
+				if (user) {
+					errors.message = "Username already exists";
 
-			return newUser
-				.save()
-				.then(user => {
-					res.status(200).json({
-						message: "User registration was successful",
-						data: user,
-						errors: null
-					});
-				})
-				.catch(err => {
-					errors.err = err;
-
-					res.status(500).json({
-						message: `Error: User registration unsuccessful ${err}`,
+					return res.status(400).json({
+						message: errors.message,
 						data: null,
 						errors
 					});
-				});
+				} else {
+					const newUser = new User({
+						_id: new mongoose.Types.ObjectId(),
+						username: req.body.username,
+						email: req.body.email,
+						roles: "visitor"
+					});
+
+					return newUser
+						.save()
+						.then(user => {
+							res.status(200).json({
+								message: "User registration was successful",
+								data: user,
+								errors: null
+							});
+						})
+						.catch(err => {
+							errors.message = "There was an error processing your request";
+
+							res.status(500).json({
+								message: errors.message,
+								data: null,
+								errors
+							});
+						});
+				}
+			});
 		}
 	});
 });
@@ -201,7 +221,7 @@ router.post("/login", (req, res) => {
 	}
 
 	User.findOne({ email: req.body.email }).then(user => {
-		bcrypt.compare(req.body.password, user.password, (err, pwIsValid) => {
+		bcrypt.compare(req.body.password, user.password, (err, isMatch) => {
 			if (err) {
 				errors.err = "Auth Failed";
 
@@ -212,7 +232,7 @@ router.post("/login", (req, res) => {
 				});
 			}
 
-			if (pwIsValid) {
+			if (isMatch) {
 				const userData = {
 					_id: user._id,
 					username: user.username,
@@ -227,7 +247,7 @@ router.post("/login", (req, res) => {
 				};
 
 				// Return token to user
-				jwt.sign(userData, "secret", options, (err, token) => {
+				jwt.sign(userData, process.env.SECRET_OR_KEY, options, (err, token) => {
 					if (err) {
 						errors.err = "Auth Failed";
 						return res.status(401).json({
@@ -243,14 +263,23 @@ router.post("/login", (req, res) => {
 						errors: null
 					});
 				});
+			} else {
+				errors.message = "Password Incorrect";
+
+				return res.status(401).json({
+					success: false,
+					message: errors.message,
+					data: null,
+					errors
+				});
 			}
 		});
 	});
 });
 
-// @route   PATCH api/users/makeguest/:userId
+// @route   PATCH api/users/makeadmin/:userId
 // @desc    Addd user to guest list
-// @access  private (for admin only)
+// @access  private (for selected super user only)
 router.patch("/makeadmin/:userId", checkAuth, (req, res) => {
 	const { errors, isValid } = validatePw(req.body);
 
@@ -262,8 +291,8 @@ router.patch("/makeadmin/:userId", checkAuth, (req, res) => {
 		});
 	}
 
-	if (req.user.roles.includes("admin")) {
-		bcrypt.genSalt(10, (err, salt) => {
+	if (req.user.roles.includes(process.env.SUPER_USERNAME)) {
+		bcrypt.genSalt(Number(process.env.HASH_ROUNDS), (err, salt) => {
 			bcrypt.hash(req.body.password, salt, (err, hash) => {
 				if (err) console.log(err);
 				// set password to hashed password
@@ -322,7 +351,7 @@ router.patch("/makeguest/:userId", checkAuth, (req, res) => {
 	}
 
 	if (req.user.roles.includes("admin")) {
-		bcrypt.genSalt(10, (err, salt) => {
+		bcrypt.genSalt(Number(process.env.HASH_ROUNDS), (err, salt) => {
 			bcrypt.hash(req.body.password, salt, (err, hash) => {
 				if (err) console.log(err);
 				// set password to hashed password
@@ -497,7 +526,7 @@ router.patch("/updatepw/:userId", checkAuth, (req, res) => {
 		req.user._id === req.params.userId &&
 		(req.user.roles.includes("admin") || req.user.roles.includes("guest"))
 	) {
-		bcrypt.genSalt(10, (err, salt) => {
+		bcrypt.genSalt(Number(process.env.HASH_ROUNDS), (err, salt) => {
 			bcrypt.hash(req.body.password, salt, (err, hash) => {
 				if (err) console.log(err);
 				// set password to hashed password
@@ -590,6 +619,81 @@ router.patch("/subscribe/:userId", (req, res) => {
 
 			res.status(500).json({
 				message: `Error: There was an error processing your request`,
+				data: null,
+				errors
+			});
+		});
+});
+
+// @route   PATCH api/users/subscribe/:userId
+// @desc    Subscribe user to list
+// @access  public (cannot be done for admins for security reasons)
+router.post("/subscribe", (req, res) => {
+	const { errors, isValid } = validateUserRegistration(req.body);
+
+	if (!isValid) {
+		errors.message = "Invalid Input";
+
+		return res.status(400).json({
+			success: false,
+			message: errors.message,
+			data: null,
+			errors
+		});
+	}
+
+	User.findOne({
+		$or: [{ username: req.body.username }, { email: req.body.email }],
+		$and: [{ roles: { $ne: "admin" } }, { roles: { $ne: "subscriber" } }]
+	})
+		.then(user => {
+			if (user) {
+				errors.message =
+					"Username already subscribed, consider changing your username/password to register";
+
+				res.status(400).json({
+					success: false,
+					message: errors.message,
+					data: null,
+					errors
+				});
+			} else {
+				const newSubscriber = new User({
+					_id: new mongoose.Types.ObjectId(),
+					username: req.body.username,
+					email: req.body.email,
+					roles: "subscriber"
+				});
+
+				newSubscriber
+					.save()
+					.then(user =>
+						res.status(200).json({
+							success: true,
+							message: "You have successfully subscribed to our newsletter",
+							data: user,
+							errors: null
+						})
+					)
+					.catch(err => {
+						errors.message =
+							"Username already subscribed, consider changing your username/password to register";
+
+						return res.status(400).json({
+							success: false,
+							message: errors.message,
+							data: null,
+							errors
+						});
+					});
+			}
+		})
+		.catch(err => {
+			errors.message = "We encountered an error processing your request";
+
+			res.status(500).json({
+				success: false,
+				message: errors.message,
 				data: null,
 				errors
 			});

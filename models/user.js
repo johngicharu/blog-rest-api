@@ -6,16 +6,19 @@ const userSchema = new Schema({
 	_id: Schema.Types.ObjectId,
 	username: {
 		type: String,
-		required: true
+		required: true,
+		unique: true
 	},
 	email: {
 		type: String,
 		required: true,
 		unique: true
 	},
-	roles: [{ type: String, enum: ["admin", "subscriber", "guest"] }],
+	roles: [
+		{ type: String, enum: ["admin", "subscriber", "guest", "visitor", "super"] }
+	],
 	password: String,
-	createdOn: {
+	date: {
 		type: Date,
 		default: Date.now()
 	},

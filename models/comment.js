@@ -16,7 +16,15 @@ const commentSchema = new Schema({
 		type: Schema.Types.ObjectId,
 		ref: "Posts"
 	},
-	createdOn: {
+	parent: String,
+	replies: [
+		{
+			type: Schema.Types.ObjectId,
+			ref: "Comments"
+		}
+	],
+	approved: Boolean,
+	date: {
 		type: Date,
 		default: Date.now()
 	},

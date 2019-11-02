@@ -4,13 +4,20 @@ const Schema = mongoose.Schema;
 
 const postSchema = new Schema({
 	_id: Schema.Types.ObjectId,
-	author: {
-		type: Schema.Types.ObjectId,
-		ref: "Users"
-	},
+	authors: [
+		{
+			type: Schema.Types.ObjectId,
+			ref: "Users"
+		}
+	],
 	title: {
 		type: String,
-		required: true
+		required: true,
+		unique: true
+	},
+	categories: {
+		type: [String],
+		default: "uncategorized"
 	},
 	featuredImage: String,
 	content: String,
