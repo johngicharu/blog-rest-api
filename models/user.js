@@ -18,6 +18,7 @@ const userSchema = new Schema({
 		{ type: String, enum: ["admin", "subscriber", "guest", "visitor", "super"] }
 	],
 	password: String,
+	avatar: String,
 	date: {
 		type: Date,
 		default: Date.now()

@@ -6,7 +6,6 @@ const router = express.Router();
 
 const validateNewPost = require("../../validation/validateNewPost");
 
-const Blog = require("../../models/blog");
 const Post = require("../../models/post");
 const Comment = require("../../models/comment");
 
@@ -168,6 +167,7 @@ router.post("/", checkAuth, (req, res) => {
 					_id: new mongoose.Types.ObjectId(),
 					authors: [...authors],
 					title: req.body.title,
+					featuredImage: req.body.featuredImage,
 					content: req.body.content,
 					categories: req.body.categories ? categories : ["uncategorized"]
 				});

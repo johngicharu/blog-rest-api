@@ -8,6 +8,7 @@ const commentSchema = new Schema({
 		type: Schema.Types.ObjectId,
 		ref: "Users"
 	},
+	avatar: String,
 	content: {
 		type: String,
 		required: true

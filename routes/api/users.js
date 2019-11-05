@@ -1,6 +1,7 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
+const gravatar = require("gravatar");
 const jwt = require("jsonwebtoken");
 const checkAuth = require("../middleware/checkAuth");
 
@@ -175,10 +176,16 @@ router.post("/register", (req, res) => {
 						errors
 					});
 				} else {
+					const avatar = gravatar.url(req.body.email, {
+						s: "200", // size
+						r: "pg", // rating
+						d: "mm" // default (mm - no profile image)
+					});
 					const newUser = new User({
 						_id: new mongoose.Types.ObjectId(),
 						username: req.body.username,
 						email: req.body.email,
+						avatar,
 						roles: "visitor"
 					});
 
@@ -468,6 +475,11 @@ router.patch("/update/:userId", checkAuth, (req, res) => {
 		req.user._id === req.params.userId &&
 		(req.user.roles.includes("admin") || req.user.roles.includes("guest"))
 	) {
+		const avatar = gravatar.url(req.body.email, {
+			s: "200", // size
+			r: "pg", // rating
+			d: "mm" // default (mm - no profile image)
+		});
 		User.findOneAndUpdate(
 			{
 				_id: req.params.userId,
@@ -477,6 +489,7 @@ router.patch("/update/:userId", checkAuth, (req, res) => {
 				$set: {
 					username: req.body.username ? req.body.username : username,
 					email: req.body.email ? req.body.email : email,
+					avatar,
 					modifiedOn: Date.now()
 				}
 			},

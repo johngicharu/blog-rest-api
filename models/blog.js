@@ -18,12 +18,6 @@ const blogSchema = new Schema({
 		ref: "Users"
 	},
 	email: String,
-	comments: [
-		{
-			type: Schema.Types.ObjectId,
-			ref: "Comments"
-		}
-	],
 	date: {
 		type: Date,
 		default: Date.now()

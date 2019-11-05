@@ -59,11 +59,15 @@ const blog = require("./routes/api/blog");
 const postsRouter = require("./routes/api/posts");
 const usersRouter = require("./routes/api/users");
 const commentsRouter = require("./routes/api/comments");
+const uploadsRouter = require("./routes/api/uploads");
 
 app.use("/api/blog", blog);
 app.use("/api/posts", postsRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/comments", commentsRouter);
+app.use("/api/uploads", uploadsRouter);
+
+app.use("/uploads", express.static("uploads"));
 
 app.get("/", (req, res, next) => {
 	res.status(200).json({

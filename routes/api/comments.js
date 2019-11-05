@@ -1,5 +1,6 @@
 const router = require("express").Router();
 const mongoose = require("mongoose");
+const gravatar = require("gravatar");
 
 const Comment = require("../../models/comment");
 const Post = require("../../models/post");
@@ -166,12 +167,18 @@ router.post("/:postId", (req, res) => {
 		{ password: 0 }
 	)
 		.then(user => {
+			const avatar = gravatar.url(req.body.email, {
+				s: "200", // size
+				r: "pg", // rating
+				d: "mm" // default (mm - no profile image)
+			});
 			const newUser = user
 				? user
 				: new User({
 						_id: new mongoose.Types.ObjectId(),
 						username: req.body.username,
 						email: req.body.email,
+						avatar,
 						roles: "visitor"
 				  })
 						.save()
@@ -198,11 +205,17 @@ router.post("/:postId", (req, res) => {
 							errors
 						});
 					} else {
+						const avatar = gravatar.url(req.body.email, {
+							s: "200", // size
+							r: "pg", // rating
+							d: "mm" // default (mm - no profile image)
+						});
 						const newComment = new Comment({
 							_id: new mongoose.Types.ObjectId(),
 							user: newUser._id,
 							content: req.body.content,
 							parent: null,
+							avatar,
 							commentOn: req.params.postId,
 							approved:
 								user.roles.includes("admin") || user.roles.includes("guest")

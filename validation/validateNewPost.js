@@ -10,6 +10,12 @@ module.exports = function validatePostInput(data) {
 		errors.title = "Title is required";
 	}
 
+	data.featuredImage = !isEmpty(data.featuredImage) ? data.featuredImage : "";
+
+	if (Validator.isEmpty(data.featuredImage)) {
+		errors.featuredImage = "Featured Image is required";
+	}
+
 	return {
 		errors,
 		isValid: isEmpty(errors)
